@@ -2,7 +2,14 @@ import { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import type { SceneDraft, FieldError } from './model';
 import { validateScene } from './geometry/validation';
 import { analyzeCollisions, poseAtTime } from './geometry/collision';
-import { formatRat, ratFromNumber, ratToNumber, type RatPoint } from './geometry/rational';
+import { compareRat, formatRat, rat, ratFromNumber, ratToNumber, type Rat, type RatPoint } from './geometry/rational';
+import {
+  computeEnvelope,
+  validateEnvelopeRequest,
+  type EnvelopeFieldError,
+  type EnvelopeRequest,
+  type EnvelopeResult
+} from './geometry/envelope';
 import { SceneCanvas } from './components/SceneCanvas';
 
 const initialScene: SceneDraft = {
@@ -101,6 +108,52 @@ export default function App() {
   const animationRef = useRef<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
 
+  // 占用包络请求：输入文本始终保留（即使非法），只有点击“确认”且校验通过
+  // 后才生成 confirmedRequest；包络本身随场景编辑自动重算。
+  const [envelopeDraft, setEnvelopeDraft] = useState({ boom: '0', start: '0', end: '1000' });
+  const [envelopeErrors, setEnvelopeErrors] = useState<EnvelopeFieldError[]>([]);
+  const [confirmedRequest, setConfirmedRequest] = useState<EnvelopeRequest | null>(null);
+  const [selectedEnvelopeEdge, setSelectedEnvelopeEdge] = useState<number | null>(null);
+
+  // 请求只在确认瞬间校验通过；场景编辑若使共同校核区间变化，旧请求可能
+  // 越界——此时随当前 report 区间重新校验，越界即移除包络（不碰碰撞结论）。
+  const requestStillValid = useMemo(() => {
+    if (!confirmedRequest || !report) return false;
+    const start = rat(confirmedRequest.start);
+    const end = rat(confirmedRequest.end);
+    return (
+      compareRat(start, report.interval.start) >= 0 &&
+      compareRat(end, report.interval.end) <= 0 &&
+      compareRat(start, end) <= 0
+    );
+  }, [confirmedRequest, report]);
+
+  const envelope = useMemo<EnvelopeResult | null>(() => {
+    if (!validation.scene || !confirmedRequest || !requestStillValid) return null;
+    return computeEnvelope(
+      validation.scene.booms[confirmedRequest.boom],
+      confirmedRequest.boom,
+      confirmedRequest.start,
+      confirmedRequest.end
+    );
+  }, [validation.scene, confirmedRequest, requestStillValid]);
+
+  // 场景编辑后旧选中边可能不再存在；清掉选中态（包络本身随场景自动重算）。
+  useEffect(() => {
+    setSelectedEnvelopeEdge(null);
+  }, [validation.scene]);
+
+  const envelopeErrorsByPath = useMemo(
+    () => new Map(envelopeErrors.map((error) => [error.path, error])),
+    [envelopeErrors]
+  );
+  const selectedEnvelopeEdgeData = useMemo(
+    () => (envelope && selectedEnvelopeEdge !== null
+      ? envelope.edges.find((edge) => edge.id === selectedEnvelopeEdge) ?? null
+      : null),
+    [envelope, selectedEnvelopeEdge]
+  );
+
   const startNumber = report ? ratToNumber(report.interval.start) : 0;
   const endNumber = report ? ratToNumber(report.interval.end) : 1000;
 
@@ -182,6 +235,42 @@ export default function App() {
     return validation.scene.booms.map((boom) => poseAtTime(boom, time)) as [RatPoint[], RatPoint[]];
   }, [validation.scene, playhead]);
 
+  const confirmEnvelope = () => {
+    if (!report) return;
+    const { request, errors } = validateEnvelopeRequest(
+      envelopeDraft.boom,
+      envelopeDraft.start,
+      envelopeDraft.end,
+      report.interval
+    );
+    setEnvelopeErrors(errors);
+    if (errors.length > 0 || !request) {
+      // 非法时保留文本、移除包络；碰撞结论不受影响。
+      setConfirmedRequest(null);
+      setSelectedEnvelopeEdge(null);
+      return;
+    }
+    setConfirmedRequest(request);
+    setSelectedEnvelopeEdge(null);
+  };
+
+  useEffect(() => {
+    const first = envelopeErrors[0];
+    if (!first) return;
+    document.getElementById(fieldId(first.path))?.focus();
+  }, [envelopeErrors]);
+
+  const handleEnvelopeEdgeClick = useCallback((edgeId: number) => {
+    setSelectedEnvelopeEdge(edgeId);
+    setPlaying(false);
+  }, []);
+
+  // 选中边后回放跳到其首次出现的最早精确时刻（通过 rational->number，
+  // 与既有回放时间管线一致；点击信息卡同步展示精确值）。
+  useEffect(() => {
+    if (selectedEnvelopeEdgeData) setPlayhead(ratToNumber(selectedEnvelopeEdgeData.firstTime));
+  }, [selectedEnvelopeEdgeData]);
+
   return (
     <main className="app-shell">
       <header>
@@ -196,8 +285,11 @@ export default function App() {
             currentPoses={currentPoses}
             report={report}
             playhead={playhead}
+            envelope={envelope}
+            selectedEnvelopeEdge={selectedEnvelopeEdge}
             onForbiddenVertexMove={moveForbiddenVertex}
             onKeyframePositionMove={moveKeyframePosition}
+            onEnvelopeEdgeClick={handleEnvelopeEdgeClick}
           />
           <div className="playback">
             <button disabled={!report} onClick={() => setPlaying((value) => !value)}>
@@ -224,9 +316,81 @@ export default function App() {
             />
             <strong data-testid="playhead">{playhead.toFixed(2)} ms</strong>
           </div>
+
+          <div className="envelope-controls">
+            <label>
+              吊杆
+              <select
+                aria-label="包络吊杆"
+                value={envelopeDraft.boom}
+                onChange={(event) => setEnvelopeDraft((value) => ({ ...value, boom: event.target.value }))}
+              >
+                <option value="0">1 号吊杆</option>
+                <option value="1">2 号吊杆</option>
+              </select>
+            </label>
+            <EnvelopeField
+              label="起始毫秒"
+              path="envelope.start"
+              value={envelopeDraft.start}
+              error={envelopeErrorsByPath.get('envelope.start')}
+              interval={report?.interval}
+              onChange={(text) => {
+                setEnvelopeErrors([]);
+                setEnvelopeDraft((draftValue) => ({ ...draftValue, start: text }));
+              }}
+            />
+            <EnvelopeField
+              label="结束毫秒"
+              path="envelope.end"
+              value={envelopeDraft.end}
+              error={envelopeErrorsByPath.get('envelope.end')}
+              interval={report?.interval}
+              onChange={(text) => {
+                setEnvelopeErrors([]);
+                setEnvelopeDraft((draftValue) => ({ ...draftValue, end: text }));
+              }}
+            />
+            <button className="confirm-envelope" disabled={!report} onClick={confirmEnvelope}>
+              确认计算占用包络
+            </button>
+          </div>
         </div>
 
         <div className="result-panel" aria-live="polite">
+          {envelope ? (
+            <article className="result envelope">
+              <h2>占用包络</h2>
+              <p data-testid="envelope-summary">
+                吊杆 {envelope.boom + 1} · 区间 [{formatRat(envelope.start)}, {formatRat(envelope.end)}] ms
+              </p>
+              <p>
+                精确面积：<strong data-testid="envelope-area">{formatRat(envelope.area)}</strong> mm²
+                ；外环 <strong data-testid="envelope-outers">{envelope.outerLoops.length}</strong> 个，
+                孔洞 <strong data-testid="envelope-holes">{envelope.holes.length}</strong> 个。
+              </p>
+              {selectedEnvelopeEdgeData ? (
+                <dl className="envelope-edge-info" data-testid="envelope-edge-info">
+                  <dt>最早时刻</dt>
+                  <dd>{formatRat(selectedEnvelopeEdgeData.firstTime)} ms（回放已跳转）</dd>
+                  <dt>源关键帧段</dt>
+                  <dd>
+                    第 {selectedEnvelopeEdgeData.segment + 1} 段 ·
+                    [{formatRat(selectedEnvelopeEdgeData.segmentStart)},{' '}
+                    {formatRat(selectedEnvelopeEdgeData.segmentEnd)}] ms
+                  </dd>
+                  <dt>源轮廓特征</dt>
+                  <dd>
+                    {selectedEnvelopeEdgeData.feature.kind === 'edge'
+                      ? `轮廓边 E${selectedEnvelopeEdgeData.feature.index + 1}`
+                      : `轮廓顶点 V${selectedEnvelopeEdgeData.feature.index + 1}`}
+                  </dd>
+                </dl>
+              ) : (
+                <p className="envelope-hint">点击画布上的青色包络边，回放跳到该边首次出现的最早精确时刻，并高亮对应源轮廓特征。</p>
+              )}
+            </article>
+          ) : null}
           {validation.errors.length > 0 ? (
             <article className="result invalid">
               <h2>输入非法</h2>
@@ -333,5 +497,39 @@ function EditorCard({ title, children }: { title: string; children: React.ReactN
       <h2>{title}</h2>
       {children}
     </article>
+  );
+}
+
+function EnvelopeField({
+  label,
+  path,
+  value,
+  error,
+  interval,
+  onChange
+}: {
+  label: string;
+  path: 'envelope.start' | 'envelope.end';
+  value: string;
+  error?: FieldError;
+  interval?: { start: Rat; end: Rat };
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className={`number-field envelope-field ${error ? 'invalid' : ''}`} htmlFor={fieldId(path)}>
+      <span>
+        {label}
+        {interval ? `（共同区间 ${formatRat(interval.start)}–${formatRat(interval.end)}）` : ''}
+      </span>
+      <input
+        id={fieldId(path)}
+        inputMode="numeric"
+        value={value}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${fieldId(path)}-error` : undefined}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {error ? <small id={`${fieldId(path)}-error`}>{error.message}</small> : null}
+    </label>
   );
 }

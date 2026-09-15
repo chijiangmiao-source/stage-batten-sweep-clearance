@@ -37,6 +37,32 @@ header p { margin: 0 0 20px; color: #475569; }
 .canvas-panel canvas { display: block; border-radius: 10px; }
 .playback { display: flex; align-items: center; gap: 12px; padding: 12px 4px 2px; }
 .playback input { flex: 1; }
+.envelope-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px 4px 2px;
+  flex-wrap: wrap;
+  border-top: 1px dashed #cbd5e1;
+  margin-top: 8px;
+}
+.envelope-controls > label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: #64748b;
+}
+.envelope-controls select { padding: 6px 8px; border: 1px solid #94a3b8; border-radius: 6px; }
+.envelope-field { flex: 1 1 130px; }
+.confirm-envelope { background: #0e7490; color: #fff; border-color: #0e7490; }
+.confirm-envelope:hover:not(:disabled) { background: #155e75; }
+.result.envelope { background: #ecfeff; border: 1px solid #0891b2; margin-bottom: 12px; }
+.result.envelope h2 { font-size: 18px; margin-bottom: 6px; }
+.envelope-edge-info { display: grid; grid-template-columns: 86px 1fr; gap: 6px 10px; margin: 10px 0 0; }
+.envelope-edge-info dt { font-weight: 700; }
+.envelope-edge-info dd { margin: 0; }
+.envelope-hint { color: #475569; font-size: 13px; }
 .result-panel { padding: 18px; min-height: 220px; }
 .result { border-radius: 12px; padding: 16px; }
 .result h2 { margin-top: 0; }

@@ -88,3 +88,83 @@ test('illegal input is retained, clears the stale verdict and locates the first 
   await duplicateField.fill('500');
   await expect(page.getByRole('heading', { name: '首次接触' })).toBeVisible();
 });
+
+test('envelope across keyframes overlays exact area and ring count, and edge click jumps to its earliest time', async ({ page }) => {
+  await page.goto('/');
+  // Boom 1 keyframes 0..1000; request an interval straddling no interior frame
+  // first (0..1000), then a between-frames interval (200..800) to exercise
+  // endpoint pose reuse between keyframes.
+  await page.locator('#field-envelope-start').fill('200');
+  await page.locator('#field-envelope-end').fill('800');
+  await page.getByRole('button', { name: '确认计算占用包络' }).click();
+
+  await expect(page.getByTestId('envelope-summary')).toContainText('[200, 800] ms');
+  // Box 60x30 translates 60 mm in x: area = 1800 + 60*30 = 3600.
+  await expect(page.getByTestId('envelope-area')).toHaveText('3600');
+  await expect(page.getByTestId('envelope-outers')).toHaveText('1');
+  await expect(page.getByTestId('envelope-holes')).toHaveText('0');
+
+  // Click the first envelope edge using the canvas projection test hook, then
+  // verify the playhead jumps to that edge's exact earliest time.
+  const click = await page.evaluate(() => {
+    const canvas = document.querySelector('canvas') as HTMLCanvasElement & {
+      __project?: (x: number, y: number) => [number, number];
+      __envelopeEdges?: Array<{ id: number; x1: number; y1: number; x2: number; y2: number; firstTime: number }>;
+    };
+    const edges = canvas.__envelopeEdges ?? [];
+    const target = edges.find((edge) => edge.firstTime === 200) ?? edges[0];
+    const rect = canvas.getBoundingClientRect();
+    const cx = (target.x1 + target.x2) / 2;
+    const cy = (target.y1 + target.y2) / 2;
+    return { clientX: rect.left + cx, clientY: rect.top + cy, firstTime: target.firstTime };
+  });
+  await page.mouse.click(click.clientX, click.clientY);
+  await expect(page.getByTestId('playhead')).toHaveText(`${click.firstTime.toFixed(2)} ms`);
+  await expect(page.getByTestId('envelope-edge-info')).toBeVisible();
+});
+
+test('envelope start/end errors retain text, remove the envelope and refocus, without clearing the 700 ms contact', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByText('时间：')).toContainText('700 ms');
+  await page.getByRole('button', { name: '确认计算占用包络' }).click();
+  await expect(page.getByTestId('envelope-area')).toBeVisible();
+
+  // Non-integer start: text retained, envelope removed, first error focused.
+  await page.locator('#field-envelope-start').fill('1.5');
+  await page.getByRole('button', { name: '确认计算占用包络' }).click();
+  await expect(page.getByTestId('envelope-area')).toHaveCount(0);
+  await expect(page.locator('#field-envelope-start')).toBeFocused();
+  await expect(page.getByText(/起始毫秒必须是整数/)).toBeVisible();
+  // Contact verdict remains.
+  await expect(page.getByText('时间：')).toContainText('700 ms');
+
+  // Reversed bounds:
+  await page.locator('#field-envelope-start').fill('900');
+  await page.locator('#field-envelope-end').fill('100');
+  await page.getByRole('button', { name: '确认计算占用包络' }).click();
+  await expect(page.locator('#field-envelope-start')).toBeFocused();
+  await expect(page.getByText(/不得晚于/)).toBeVisible();
+
+  // Out of common interval [0,1000]:
+  await page.locator('#field-envelope-start').fill('0');
+  await page.locator('#field-envelope-end').fill('1001');
+  await page.getByRole('button', { name: '确认计算占用包络' }).click();
+  await expect(page.locator('#field-envelope-end')).toBeFocused();
+
+  // Fix and reconfirm: envelope comes back, errors gone.
+  await page.locator('#field-envelope-end').fill('1000');
+  await page.getByRole('button', { name: '确认计算占用包络' }).click();
+  await expect(page.getByTestId('envelope-area')).toBeVisible();
+  await expect(page.getByText(/必须是整数|不得晚于|必须位于共同校核区间/)).toHaveCount(0);
+  await expect(page.getByText('时间：')).toContainText('700 ms');
+});
+
+test('default scene still reports the original first contact at 700 ms after envelope interactions', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '确认计算占用包络' }).click();
+  await expect(page.getByTestId('envelope-area')).toHaveText('4800');
+  await expect(page.getByRole('heading', { name: '首次接触' })).toBeVisible();
+  await expect(page.getByText('时间：')).toContainText('700 ms');
+  await page.getByRole('button', { name: '跳到首次接触' }).click();
+  await expect(page.getByTestId('playhead')).toHaveText('700.00 ms');
+});
