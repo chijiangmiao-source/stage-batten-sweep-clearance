@@ -69,6 +69,9 @@ describe('polygon and keyframe validation', () => {
       d.forbidden.vertices = [{ x: '0', y: '0' }, { x: '20', y: '0' }, { x: '20', y: '20' }, { x: '0', y: '20' }];
     }));
     expect(ccw.errors.some((e) => e.message.includes('顺时针'))).toBe(true);
+    // The orientation error must point at a focusable field, not the bare vertices container.
+    const orientationError = ccw.errors.find((e) => e.message.includes('顺时针'));
+    expect(orientationError?.path).toBe('forbidden.vertices.0.x');
   });
 
   it('rejects non-integer and non strictly increasing keyframe times', () => {
@@ -202,6 +205,22 @@ describe('exact continuous collision detection', () => {
       for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return a[i] - b[i];
       return 0;
     }));
+  });
+
+  it('reports immediate overlap at the start for two non-origin booms when one fully contains the other', () => {
+    const largeCW = [
+      { x: -100n, y: 100n },
+      { x: 100n, y: 100n },
+      { x: 100n, y: -100n },
+      { x: -100n, y: -100n }
+    ];
+    const report = analyzeCollisions(scene([
+      boom(squareCW, staticFrame(500n, 500n)),
+      boom(largeCW, staticFrame(500n, 500n))
+    ]));
+    expect(report.safe).toBe(false);
+    expect(formatRat(report.time!)).toBe('0');
+    expect(report.contacts[0]).toMatchObject({ pair: [1, 2], edges: [1, 1], kind: 'initial-overlap' });
   });
 
   it('returns the minimum edge numbers when overlap already exists at interval start without boundary intersection', () => {

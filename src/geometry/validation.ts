@@ -55,8 +55,10 @@ export function validatePolygon(
     return x === null || y === null ? null : intPoint(x, y);
   });
 
+  const firstVertexPath = `${pathPrefix}.vertices.0.x`;
+
   if (points.length < 3) {
-    errors.push({ path: `${pathPrefix}.vertices`, message: `${label}至少需要三个顶点` });
+    errors.push({ path: firstVertexPath, message: `${label}至少需要三个顶点` });
   }
 
   const validPoints = points.filter((p): p is IntPoint => p !== null);
@@ -79,9 +81,9 @@ export function validatePolygon(
       area2 += a.x * b.y - b.x * a.y;
     }
     if (area2 === 0n) {
-      errors.push({ path: `${pathPrefix}.vertices`, message: `${label}面积为零` });
+      errors.push({ path: firstVertexPath, message: `${label}面积为零` });
     } else if (area2 > 0n) {
-      errors.push({ path: `${pathPrefix}.vertices`, message: `${label}必须按顺时针录入` });
+      errors.push({ path: firstVertexPath, message: `${label}必须按顺时针录入` });
     }
 
     for (let i = 0; i < validPoints.length; i += 1) {

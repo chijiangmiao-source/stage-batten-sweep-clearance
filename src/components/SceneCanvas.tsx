@@ -142,7 +142,14 @@ export function SceneCanvas({
     ctx.fillRect(0, 0, width, height);
     ctx.strokeStyle = '#e2e8f0';
     ctx.lineWidth = 1;
-    const grid = 50;
+    // Adaptive spacing: fixed 50 mm spacing would draw tens of millions of lines
+    // for very large scenes and freeze the browser. Pick a 1/2/5 × 10^k spacing so
+    // the larger world dimension never needs more than ~24 grid lines.
+    const targetCells = 24;
+    const rough = Math.max(worldWidth, worldHeight) / targetCells;
+    const power = Math.pow(10, Math.floor(Math.log10(Math.max(rough, 1e-9))));
+    const candidates = [power, 2 * power, 5 * power, 10 * power];
+    const grid = candidates.find((candidate) => candidate >= rough) ?? 10 * power;
     for (let x = Math.ceil(bounds.minX / grid) * grid; x <= bounds.maxX; x += grid) {
       const [sx] = project(x, 0);
       ctx.beginPath();

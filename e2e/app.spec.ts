@@ -33,6 +33,42 @@ test('moving the forbidden zone away yields a safe verdict over the whole closed
   await expect(page.getByRole('heading', { name: '首次接触' })).toHaveCount(0);
 });
 
+test('jumping to a sub-microsecond rational first contact does not crash the page', async ({ page }) => {
+  await page.goto('/');
+  const fields: Array<[string, string]> = [
+    ['#field-booms-1-keyframes-0-x', '200'],
+    ['#field-booms-1-keyframes-0-y', '169'],
+    ['#field-booms-1-keyframes-1-t', '1'],
+    ['#field-booms-1-keyframes-1-x', '200'],
+    ['#field-booms-1-keyframes-1-y', '1000000169']
+  ];
+  for (const [selector, value] of fields) {
+    await page.locator(selector).fill(value);
+  }
+
+  await expect(page.getByText('时间：')).toContainText('1/1000000000 ms');
+  await page.getByRole('button', { name: '跳到首次接触' }).click();
+  await expect(page.getByRole('heading', { name: '首次接触' })).toBeVisible();
+  await expect(page.locator('canvas')).toBeVisible();
+});
+
+test('a counter-clockwise forbidden polygon focuses the first offending field', async ({ page }) => {
+  await page.goto('/');
+  const ccw = [
+    ['300', '100'],
+    ['500', '100'],
+    ['500', '300'],
+    ['300', '300']
+  ];
+  for (let i = 0; i < ccw.length; i += 1) {
+    await page.locator(`#field-forbidden-vertices-${i}-x`).fill(ccw[i][0]);
+    await page.locator(`#field-forbidden-vertices-${i}-y`).fill(ccw[i][1]);
+  }
+  await expect(page.getByRole('heading', { name: '输入非法' })).toBeVisible();
+  await expect(page.getByText(/必须按顺时针录入/)).toBeVisible();
+  await expect(page.locator('#field-forbidden-vertices-0-x')).toBeFocused();
+});
+
 test('illegal input is retained, clears the stale verdict and locates the first bad field', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: '首次接触' })).toBeVisible();

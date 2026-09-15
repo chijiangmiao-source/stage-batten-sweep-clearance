@@ -430,32 +430,32 @@ function buildContact(candidate: Candidate, time: Rat): GeometryContact {
   };
 }
 
-function strictlyInside(points: RatPoint[], polygon: IntPoint[]): boolean {
+function strictlyInside(points: RatPoint[], polygon: RatPoint[]): boolean {
   return points.every((p) =>
     polygon.every((startValue, edgeIndex) => {
       const endValue = polygon[(edgeIndex + 1) % polygon.length];
-      const edge: IntPoint = { x: endValue.x - startValue.x, y: endValue.y - startValue.y };
-      const relative = { x: subRat(p.x, rat(startValue.x)), y: subRat(p.y, rat(startValue.y)) };
-      return compareRat(crossRat(toRatPoint(edge), relative), rZero()) < 0;
+      const edge = subRatPoint(endValue, startValue);
+      const relative = subRatPoint(p, startValue);
+      return compareRat(crossRat(edge, relative), rZero()) < 0;
     })
   );
 }
 
 function findInitialOverlaps(scene: ValidScene, start: Rat, pairsWithBoundaryContact: Set<number>): GeometryContact[] {
-  const polygons = [0, 1, 2].map((id) => {
-    const vertices = polygonForObject(scene, id).vertices;
-    const points = id === 2
-      ? vertices.map((p) => toRatPoint(p))
-      : poseAtTime(scene.booms[id], start);
-    return { id, vertices, points };
-  });
+  // All three polygons must be in world coordinates: boom vertices are local and
+  // only become a world pose after adding the anchor held at the interval start.
+  const worldPolygons = [0, 1, 2].map((id) =>
+    id === 2
+      ? scene.forbidden.vertices.map((p) => toRatPoint(p))
+      : poseAtTime(scene.booms[id], start)
+  );
 
   const contacts: GeometryContact[] = [];
   pairDefinitions.forEach(([ai, bi], pairIndex) => {
     if (pairsWithBoundaryContact.has(pairIndex)) return;
-    const a = polygons[ai];
-    const b = polygons[bi];
-    if (strictlyInside(a.points, b.vertices) || strictlyInside(b.points, a.vertices)) {
+    const a = worldPolygons[ai];
+    const b = worldPolygons[bi];
+    if (strictlyInside(a, b) || strictlyInside(b, a)) {
       contacts.push({
         pair: [ai + 1, bi + 1],
         edges: [1, 1],

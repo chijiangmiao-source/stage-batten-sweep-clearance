@@ -35,13 +35,24 @@ export function isRat(value: unknown): value is Rat {
 export function ratFromNumber(value: number): Rat {
   if (!Number.isFinite(value)) throw new Error('Only finite numbers can be converted to rational');
   if (Number.isInteger(value)) return rat(BigInt(value));
-  const text = value.toString(10);
+
+  let text = value.toString(10);
+  let exponent = 0;
+  const exponentMatch = /e([+-]?\d+)$/i.exec(text);
+  if (exponentMatch) {
+    exponent = Number.parseInt(exponentMatch[1], 10);
+    text = text.slice(0, exponentMatch.index);
+  }
+
   const negative = text.startsWith('-');
   const unsigned = negative ? text.slice(1) : text;
   const [integer, fraction = ''] = unsigned.split('.');
-  const denominator = 10n ** BigInt(fraction.length);
-  const numerator = BigInt(integer) * denominator + BigInt(fraction);
-  return rat(negative ? -numerator : numerator, denominator);
+  const digits = BigInt(`${integer}${fraction}`);
+  const numerator = negative ? -digits : digits;
+  const exponentAdjust = exponent - fraction.length;
+
+  if (exponentAdjust >= 0) return rat(numerator * 10n ** BigInt(exponentAdjust));
+  return rat(numerator, 10n ** BigInt(-exponentAdjust));
 }
 
 export function reduce(x: Rat): Rat {
