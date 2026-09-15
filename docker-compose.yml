@@ -1,0 +1,18 @@
+services:
+  web:
+    build:
+      context: .
+    image: stage-boom-preview:latest
+    ports:
+      # WEB_PORT overrides the host-side port; the container always serves 4173.
+      - "${WEB_PORT:-8080}:4173"
+    restart: unless-stopped
+
+  # One-shot verification: docker compose --profile verify run --rm verify
+  verify:
+    image: stage-boom-preview:latest
+    build:
+      context: .
+    profiles:
+      - verify
+    command: ["npm", "run", "verify:ci"]
